@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VidSpark - AI-Powered YouTube Thumbnail Ideas</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body, html { font-family: 'Inter', sans-serif; margin: 0; padding: 0; height: 100%; }
+        body { background-color: #0f172a; color: white; display: flex; justify-content: center; align-items: center; }
+        .container { background-color: #1e293b; padding: 2rem; border-radius: 1rem; max-width: 600px; width: 100%; text-align: center; }
+        .headline { font-size: 2.5rem; font-weight: bold; margin-bottom: 0.5rem; }
+        .subheadline { font-size: 1.25rem; margin-bottom: 1.5rem; }
+        .form-group { margin-bottom: 1.5rem; }
+        input, button { padding: 0.75rem 1.5rem; font-size: 1rem; border: none; border-radius: 0.5rem; }
+        input { background-color: #334155; color: white; width: calc(100% - 3rem); }
+        button { background-color: #6366f1; color: white; cursor: pointer; }
+        button:hover { background-color: #4f46e5; }
+        .viral-attribution { font-size: 0.75rem; opacity: 0.7; margin-top: 1rem; }
+        .paywall-content { display: none; }
+        .active { display: block; }
+        .centered { display: flex; justify-content: center; align-items: center; height: 100vh; }
+    </style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+    const CONFIG = {
+        GROQ_KEY: 'CONFIG.GROQ_KEY',
+        SUPABASE_ANON_KEY: 'your-supabase-anon-key',
+        SUPABASE_URL: 'https://your-supabase-url.supabase.co'
+    };
+
+    const POSTHOG_PROJECT_API_KEY = 'your-posthog-api-key';
+    const POSTHOG_HOST = 'https://app.posthog.com';
+
+    const supabase = (() => {
+        const { createClient } = SupabaseClient;
+        return createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+    })();
+
+    const posthog = (() => {
+        const script = document.createElement('script');
+        script.async = true;
+        script.src = 'https://cdn.posthog.com/posthog-js.min.js';
+        document.head.appendChild(script);
+        script.onload = () => {
+            posthog.init(POSTHOG_PROJECT_API_KEY, { api_host: POSTHOG_HOST });
+        };
+        return {
+            capture: (event, properties) => {
+                if (window.posthog) {
+                    window.posthog.capture(event, properties);
+                }
+            }
+        };
+    })();
+
+    const App = () => {
+        const [view, setView] = React.useState('landing');
+        const [title, setTitle] = React.useState('');
+        const [thumbnailIdeas, setThumbnailIdeas] = React.useState([]);
+        const [freeUses, setFreeUses] = React.useState(localStorage.getItem('freeUses') ? parseInt(localStorage.getItem('freeUses')) : 0);
+
+        const handleTitleChange = (e) => setTitle(e.target.value);
+
+        const getThumbnailIdeas = async () => {
+            posthog.capture('tool_used');
+            setFreeUses(prev => {
+                const newFreeUses = prev + 1;
+                localStorage.setItem('freeUses', newFreeUses);
+                return newFreeUses;
+            });
+
+            const response = await fetch('https://api.groq.com/v1/engines/llama3-70b/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${CONFIG.GROQ_KEY}`
+                },
+                body: JSON.stringify({
+                    prompt: `Generate three YouTube thumbnail ideas for a video titled "${title}"`,
+                    max_tokens: 100
+                })
+            });
+
+            const data = await response.json();
+            const ideas = data.completions[0].text.trim().split('\n').map(i => i.trim()).filter(i => i);
+            setThumbnailIdeas(ideas);
+        };
+
+        const handleCTAClick = () => {
+            posthog.capture('tool_opened');
+            setView('tool');
+        };
+
+        const handlePaymentClick = () => {
+            posthog.capture('payment_clicked');
+            window.location.href = 'https://buy.stripe.com/placeholder-youtube-thumbnail-ideas';
+        };
+
+        const handleEmailCapture = async (e) => {
+            e.preventDefault();
+            const email = e.target.email.value;
+            await supabase.from('leads').insert([{ email }]);
+            posthog.capture('email_captured', { email });
+            setFreeUses(prev => prev + 3);
+            localStorage.setItem('freeUses', freeUses + 3);
+            setView('tool');
+        };
+
+        React.useEffect(() => {
+            if (freeUses >= 2) {
+                setView('paywall');
+                posthog.capture('free_limit_hit');
+            }
+        }, [freeUses]);
+
+        return (
+            <div className="container">
+                <div className={`centered ${view === 'landing' ? 'active' : ''}`}>
+                    <div>
+                        <h1 className="headline">Low Click-Through Rates</h1>
+                        <h2 className="subheadline">YouTubers create engaging thumbnails in seconds</h2>
+                        <button onClick={handleCTAClick} className="cta">Spark Views Now</button>
+                    </div>
+                </div>
+                <div className={`centered ${view === 'tool' ? 'active' : ''}`}>
+                    <div>
+                        <h2 className="headline">Enter your video title</h2>
+                        <div className="form-group">
+                            <input type="text" value={title} onChange={handleTitleChange} placeholder="Video Title" />
+                        </div>
+                        <button onClick={getThumbnailIdeas} disabled={!title}>Get AI Ideas</button>
+                        {thumbnailIdeas.length > 0 && (
+                            <div>
+                                <h2 className="headline">Your thumbnail ideas</h2>
+                                {thumbnailIdeas.map((idea, index) => (
+                                    <div key={index} className="form-group">
+                                        <input type="text" value={idea + ' — Generated by VidSpark — youtube-thumbnail-ideas.vercel.app'} readOnly />
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+                <div className={`centered paywall-content ${view === 'paywall' ? 'active' : ''}`}>
+                    <div>
+                        <h1 className="headline">Upgrade to VidSpark Pro</h1>
+                        <h2 className="subheadline">Unlock unlimited thumbnail ideas for $9/mo</h2>
+                        <form onSubmit={handleEmailCapture}>
+                            <div className="form-group">
+                                <input type="email" name="email" placeholder="Enter your email" required />
+                            </div>
+                            <button type="submit">Get 3 Free Uses</button>
+                        </form>
+                        <button onClick={handlePaymentClick} className="cta">Upgrade Now</button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@latest/dist/supabase.min.js"></script>
+</body>
+</html>
